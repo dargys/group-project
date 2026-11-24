@@ -3,13 +3,15 @@ from tempfile import NamedTemporaryFile
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 
 from src.cnn_model import FruitCNNDropout
 from src.preprocess import load_image
 
 
-# Class names must match the order used during training
+# Class names must match the order used during training (alphabetical).
+# Note: the dataset folder is spelled "honneydew_melon"; the app uses the correct
+# spelling "honeydew_melon". The order is the same, so predictions are unaffected.
 CLASS_NAMES = [
     "apple",
     "honeydew_melon",
@@ -48,8 +50,9 @@ def load_cnn_model():
 
 
 def predict_image(image, model):
-    # Convert the uploaded image to RGB
-    image = image.convert("RGB")
+    # Phone photos are often stored sideways together with an orientation tag.
+    # Turn the photo upright using that tag, then convert it to RGB.
+    image = ImageOps.exif_transpose(image).convert("RGB")
 
     # Save a temporary image for the shared preprocessing function
     with NamedTemporaryFile(suffix=".png", delete=False) as temp_file:

@@ -26,6 +26,7 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
+imagehash==4.3.2
 ipykernel==7.4.0
 ipython==9.17.1
 ipython_pygments_lexers==1.1.1
@@ -60,6 +61,7 @@ nbformat==5.11.1
 nest-asyncio2==1.7.4
 notebook_shim==0.2.4
 numpy==2.5.4
+opencv-python
 packaging==26.3
 pandas==3.1.0
 pandocfilters==1.5.1
