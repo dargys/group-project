@@ -5,7 +5,7 @@ Pilot with nine kinds of fruit and vegetables.
 Run from the project root:
     streamlit run app.py
 """
-
+import io
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageOps
@@ -63,10 +63,17 @@ if st.session_state.get("photo_id") != photo_id:
     st.session_state["photo_id"] = photo_id
     st.session_state["registered"] = None
 
-# Phone photos are often stored sideways with an orientation tag: turn them upright
-photo = ImageOps.exif_transpose(Image.open(photo_file)).convert("RGB")
+@st.cache_data(show_spinner="Identifying the item…")
+def classify(photo_bytes):
+    # Phone photos are often stored sideways with an orientation tag: turn them upright
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(photo_bytes))).convert("RGB")
+    # Phone photos are large, and the model only needs 64 × 48 pixels
+    image.thumbnail((1024, 1024))
+    prediction, probabilities = predict_image(image, get_model())
+    return image, prediction, probabilities
 
-prediction, probabilities = predict_image(photo, get_model())
+
+photo, prediction, probabilities = classify(photo_file.getvalue())
 ranking = pd.Series(probabilities).sort_values(ascending=False)
 top_three = ranking.head(3)
 
