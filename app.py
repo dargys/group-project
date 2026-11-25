@@ -1,4 +1,6 @@
-"""Fruit and vegetable identifier.
+"""Checkout assistant: suggests which fruit or vegetable is on the scale.
+
+Pilot with nine kinds of fruit and vegetables.
 
 Run from the project root:
     streamlit run app.py
@@ -11,13 +13,14 @@ from PIL import Image, ImageOps
 from src.predict import CLASS_NAMES, load_cnn_model, predict_image
 
 
-# Below this confidence (in %), the app tells the user that the model is unsure
+# Below this confidence (in %), the customer is asked to check the suggestions carefully
 CONFIDENCE_LIMIT = 60
 
 DISPLAY_NAMES = {name: name.replace("_", " ").capitalize() for name in CLASS_NAMES}
+MANUAL_SEARCH = "manual search"
 
 
-st.set_page_config(page_title="Fruit and Vegetable Identifier", page_icon="🍎")
+st.set_page_config(page_title="Checkout Assistant", page_icon="🛒", layout="wide")
 
 
 @st.cache_resource
@@ -26,65 +29,98 @@ def get_model():
     return load_cnn_model()
 
 
-st.title("Fruit and Vegetable Identifier")
-st.write(
-    "Upload a photo or take one with your camera. The model recognizes nine kinds of "
-    "fruit and vegetables: " + ", ".join(DISPLAY_NAMES.values()) + "."
-)
+def label(name):
+    return f"{DISPLAY_NAMES[name]}"
 
-# --- Get a photo -------------------------------------------------------------
-source = st.radio("Photo source", ["Upload a photo", "Use the camera"], horizontal=True)
+
+# --- Demo settings (not part of the customer's screen) -------------------------------
+with st.sidebar:
+    st.header("Demo settings")
+    source = st.radio("Photo source", ["Upload a photo", "Use the camera"])
+    st.caption(
+        "In a store, the photo would come from a camera mounted above the scale. "
+        "In this demo it is uploaded or taken with a phone or laptop camera."
+    )
+    st.divider()
+    st.caption("Pilot items: " + ", ".join(DISPLAY_NAMES.values()) + ".")
+
+# --- Customer screen -----------------------------------------------------------------
+st.title("🛒 Checkout Assistant")
+st.write("Place your fruit or vegetable on the scale and choose the right item below.")
 
 if source == "Upload a photo":
-    photo_file = st.file_uploader("Choose a photo", type=["jpg", "jpeg", "png"])
+    photo_file = st.file_uploader("Photo from the scale", type=["jpg", "jpeg", "png"])
 else:
-    photo_file = st.camera_input("Take a photo")
+    photo_file = st.camera_input("Photo from the scale")
 
 if photo_file is None:
+    st.info("Waiting for an item on the scale…")
     st.stop()
+
+# Start over when a new photo arrives
+photo_id = getattr(photo_file, "file_id", None) or f"{photo_file.name}-{photo_file.size}"
+if st.session_state.get("photo_id") != photo_id:
+    st.session_state["photo_id"] = photo_id
+    st.session_state["registered"] = None
 
 # Phone photos are often stored sideways with an orientation tag: turn them upright
 photo = ImageOps.exif_transpose(Image.open(photo_file)).convert("RGB")
 
-# --- Classify ----------------------------------------------------------------
 prediction, probabilities = predict_image(photo, get_model())
 ranking = pd.Series(probabilities).sort_values(ascending=False)
-best_name, best_score = ranking.index[0], ranking.iloc[0]
+top_three = ranking.head(3)
 
-photo_column, result_column = st.columns(2)
+photo_column, choice_column = st.columns([2, 3], gap="large")
 
 with photo_column:
-    st.image(photo, caption="Your photo")
+    st.image(photo, caption="Photo from the scale")
 
-with result_column:
-    if best_score >= CONFIDENCE_LIMIT:
-        st.success(f"This looks like **{DISPLAY_NAMES[best_name]}** ({best_score:.0f}%).")
+with choice_column:
+    registered = st.session_state["registered"]
+
+    if registered is None:
+        st.subheader("Is it one of these?", anchor=False)
+        if top_three.iloc[0] < CONFIDENCE_LIMIT:
+            st.warning("We are not sure. Please check the suggestions carefully.")
+
+        for rank, (name, score) in enumerate(top_three.items(), start=1):
+            with st.container(border=True):
+                text_column, button_column = st.columns([3, 1], vertical_alignment="center")
+                with text_column:
+                    st.subheader(label(name), anchor=False)
+                    st.caption(f"Suggestion {rank} · {score:.0f}% likely")
+                with button_column:
+                    if st.button("Select", key=f"select_{name}"):
+                        st.session_state["registered"] = name
+                        st.rerun()
+
+        if st.button("None of these – search manually"):
+            st.session_state["registered"] = MANUAL_SEARCH
+            st.rerun()
+
+    elif registered == MANUAL_SEARCH:
+        st.subheader("Search manually", anchor=False)
+        st.info("The customer searches the menu as today.")
+        if st.button("Back to the suggestions"):
+            st.session_state["registered"] = None
+            st.rerun()
+
     else:
-        st.warning(
-            f"The model is unsure. Its best guess is **{DISPLAY_NAMES[best_name]}** "
-            f"({best_score:.0f}%). The photo may show something outside the nine classes, "
-            "or the background and lighting may differ from the training photos."
-        )
+        st.success("Item registered")
+        st.header(label(registered), anchor=False)
+        if st.button("Undo"):
+            st.session_state["registered"] = None
+            st.rerun()
 
-    st.subheader("Top three")
-    for name, score in ranking.head(3).items():
-        st.write(f"{DISPLAY_NAMES[name]} – {score:.1f}%")
-        st.progress(min(max(score / 100, 0.0), 1.0))
-
-st.subheader("All nine classes (%)")
-st.bar_chart(ranking.rename(index=DISPLAY_NAMES))
-
-# --- Nutritional information ---------------------------------------------------
-st.divider()
-st.subheader("Nutritional information")
-st.info("Coming next: nutritional values from Livsmedelsverket for the predicted food.")
-
-# --- About the model -------------------------------------------------------------
-with st.expander("About the model"):
+# --- Explanation for the presentation --------------------------------------------------
+with st.expander("How the suggestion was made"):
     st.write(
-        "The app uses a convolutional neural network (CNN) trained on 1,603 photos. "
-        "On 200 test photos from the same dataset it classified 98.5% correctly. "
-        "All dataset photos were taken in a few photography sessions, so the model can "
-        "perform worse on photos with other backgrounds or lighting. It can only choose "
-        "between the nine classes above."
+        "A convolutional neural network (CNN) trained on 1,603 photos gives each of the "
+        "nine pilot items a probability. The app shows the three most likely items, so the "
+        "right one is usually among them even when the first suggestion is wrong."
+    )
+    st.bar_chart(ranking.rename(index={name: DISPLAY_NAMES[name] for name in ranking.index}))
+    st.caption(
+        "The model can only choose between the nine pilot items. Photos from other cameras, "
+        "backgrounds or lighting can give lower accuracy."
     )
